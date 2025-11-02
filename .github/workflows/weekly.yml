@@ -38,7 +38,7 @@ jobs:
 
       - name: Fetch MG Bulletin (SES-MG)
         run: |
-          python -m src.cli fetch_mg
+          python -m src.cli fetch-mg
 
       - name: Prepare weekly
         run: |
