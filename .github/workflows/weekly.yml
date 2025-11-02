@@ -2,8 +2,8 @@ name: Weekly Tropical Report
 
 on:
   schedule:
-    - cron: "0 12 * * 0"   # Domingo 12:00 UTC (~09:00 BRT). Ajuste se quiser.
-  workflow_dispatch: {}      # botão "Run workflow" manual
+    - cron: "0 12 * * 0"   # Domingo 12:00 UTC (~09:00 BRT)
+  workflow_dispatch: {}
 
 jobs:
   build-and-run:
@@ -24,29 +24,36 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
-          pip install requests python-dotenv
+          # Garantias para o script que extrai texto e chama a API
+          pip install pdfplumber requests python-dotenv
 
-      - name: Generate weekly payload and report locally
+      # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      # PDFs LOCAIS — GARANTA QUE ESTES ARQUIVOS ESTEJAM VERSIONADOS NO REPO:
+      # inputs/mg/current.pdf (obrigatório)
+      # inputs/mg/previous.pdf (opcional)
+      # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      - name: Ensure local PDFs
+        run: |
+          ls -lah inputs/mg || true
+          test -f inputs/mg/current.pdf || (echo "ERRO: inputs/mg/current.pdf não encontrado." && exit 1)
+          python - << 'PY'
+from pathlib import Path
+import pdfplumber
+p = Path("inputs/mg/current.pdf")
+with pdfplumber.open(p) as pdf:
+    txt = (pdf.pages[0].extract_text() or "")[:500]
+print("OK: current.pdf aberto. Primeiros caracteres:\n", txt)
+PY
+
+      # Gera série/figuras/payload locais (usado para 'kpis' e 'figures' do Start)
+      - name: Generate weekly payload and figures
         run: |
           python -m src.cli fetch
           python -m src.cli prepare
-          python -m src.cli report
-
-      - name: Generate figures (choropleth)
-        run: |
-          python -m src.cli visuals
-
-      - name: Fetch MG Bulletin (SES-MG)
-        run: |
-          python -m src.cli fetch-mg
-
-      - name: Prepare weekly
-        run: |
-          python -m src.cli fetch
-          python -m src.cli prepare
           python -m src.cli visuals
           python -m src.cli report
 
+      # Chama o Dify enviando o TEXTO extraído dos PDFs locais
       - name: Call Dify (PDF text)
         env:
           DIFY_API_KEY: ${{ secrets.DIFY_API_KEY }}
@@ -57,6 +64,6 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add reports/weekly/*.md reports/weekly/response.json data/processed/* || true
+          git add reports/weekly/*.md reports/weekly/response.json reports/figures/* data/processed/* || true
           git commit -m "chore(report): weekly bulletin" || echo "Nothing to commit"
           git push
