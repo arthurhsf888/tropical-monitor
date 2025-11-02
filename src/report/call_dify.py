@@ -1,65 +1,120 @@
-import json, os
+from __future__ import annotations
+
+import json
+import os
 from pathlib import Path
+
 import requests
 from dotenv import load_dotenv
-from src.report.extract_pdf_text import get_current_and_previous_pdf_text
 
-def main():
-    load_dotenv()
-    api_key = os.getenv("DIFY_API_KEY")
-    if not api_key:
-        raise SystemExit("Falta DIFY_API_KEY no .env")
 
-    # 1) Texto dos PDFs locais
-    current_text, prev_text = get_current_and_previous_pdf_text()
-
-    # 2) KPIs/figures do payload (para satisfazer campos do Start)
+def _load_payload() -> tuple[str, str]:
+    """
+    Lê reports/weekly/payload.json (se existir) e devolve (kpis_json, figures_json)
+    como strings JSON. Isso satisfaz os campos do nó Iniciar no Dify.
+    """
     payload_path = Path("reports/weekly/payload.json")
-    payload = json.loads(payload_path.read_text(encoding="utf-8")) if payload_path.exists() else {}
+    if payload_path.exists():
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    else:
+        payload = {}
+
     kpis = json.dumps(payload.get("kpis", {}), ensure_ascii=False)
     figures = json.dumps(payload.get("figures", {}), ensure_ascii=False)
+    return kpis, figures
 
-    # 3) Monta inputs iguais aos campos do Start no Dify
+
+def _read_week_label() -> str:
+    """
+    Tenta pegar a semana mais recente do parquet local; se não existir,
+    usa a data de hoje como rótulo.
+    """
+    try:
+        import pandas as pd  # import local para evitar custo se não usado
+        parquet = Path("data/processed/dengue_weekly.parquet")
+        if parquet.exists():
+            df = pd.read_parquet(parquet)
+            wk = df["week"].max()
+            # Se 'week' já for date/datetime:
+            try:
+                return str(wk.date())
+            except Exception:
+                return str(wk)
+    except Exception:
+        pass
+
+    from datetime import date
+    return date.today().isoformat()
+
+
+def main() -> None:
+    load_dotenv()
+
+    api_key = os.getenv("DIFY_API_KEY")
+    if not api_key:
+        raise SystemExit("Falta DIFY_API_KEY no .env ou no ambiente.")
+
+    # Lê texto dos PDFs locais
+    from src.report.extract_pdf_text import get_current_and_previous_pdf_text
+
+    current_text, prev_text = get_current_and_previous_pdf_text()
+
+    # Lê kpis/figures do payload (ou envia {} se não existir)
+    kpis_json_str, figures_json_str = _load_payload()
+
+    # Monta os inputs com os MESMOS nomes dos campos do nó Iniciar no Dify
     inputs = {
-        "kpis": kpis,
-        "figures": figures,
+        # Campos do seu Start (mantidos para compatibilidade)
+        "kpis": kpis_json_str,
+        "figures": figures_json_str,
+
+        # Texto dos PDFs (o LLM deve ter essas variáveis no Contexto)
         "current_text": current_text,
         "previous_text": prev_text or "",
-        # não usamos upload de arquivo:
+
+        # Se o seu fluxo ainda tiver esses campos como não obrigatórios,
+        # mandamos lista vazia para evitar erro de tipagem.
         "current_pdf": [],
         "previous_pdf": [],
     }
 
     url = "https://api.dify.ai/v1/workflows/run"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     body = {"inputs": inputs, "response_mode": "blocking", "user": "cli"}
 
-    resp = requests.post(url, headers=headers, json=body)
-    r = resp.json()
+    print("[call_dify] POST", url)
+    resp = requests.post(url, headers=headers, json=body, timeout=90)
     print("[HTTP]", resp.status_code)
-    Path("reports/weekly/response.json").write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Sempre salva a resposta crua para depuração
+    out_dir = Path("reports/weekly")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = out_dir / "response.json"
+    raw_path.write_text(json.dumps(resp.json(), ensure_ascii=False, indent=2), encoding="utf-8")
+
     if resp.status_code != 200:
-        raise SystemExit(json.dumps(r, ensure_ascii=False, indent=2))
+        raise SystemExit(raw_path.read_text(encoding="utf-8"))
 
-    data = r.get("data", {}) or {}
+    data = resp.json().get("data", {}) or {}
     outputs = data.get("outputs") or {}
-    md = outputs.get("report_markdown") or next((v for v in outputs.values() if isinstance(v, str) and v.strip()), "")
+
+    # Esperamos 'report_markdown' no nó FIM
+    md = outputs.get("report_markdown")
+    if not isinstance(md, str) or not md.strip():
+        # Fallback: tenta pegar qualquer string não vazia das saídas
+        md = next((v for v in outputs.values() if isinstance(v, str) and v.strip()), "")
+
     if not md:
-        raise SystemExit("Não achei report_markdown na resposta do Dify.")
+        raise SystemExit("Não achei 'report_markdown' (ou outra string) na resposta do Dify.")
 
-    # nome do arquivo por semana (se existir parquet) senão 'latest'
-    week_str = "latest"
-    try:
-        import pandas as pd
-        week = pd.read_parquet("data/processed/dengue_weekly.parquet")["week"].max()
-        week_str = str(getattr(week, "date", lambda: week)())
-    except Exception:
-        pass
-
-    out_md = Path("reports/weekly") / f"{week_str}.md"
-    out_md.parent.mkdir(parents=True, exist_ok=True)
+    week_label = _read_week_label()
+    out_md = out_dir / f"{week_label}.md"
     out_md.write_text(md, encoding="utf-8")
     print(f"[dify] boletim salvo -> {out_md.resolve()}")
+
 
 if __name__ == "__main__":
     main()
