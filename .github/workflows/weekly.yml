@@ -32,6 +32,10 @@ jobs:
           python -m src.cli prepare
           python -m src.cli report
 
+      - name: Generate figures (choropleth)
+        run: |
+          python -m src.cli visuals
+
       - name: Call Dify to generate markdown
         env:
           DIFY_API_KEY: ${{ secrets.DIFY_API_KEY }}
