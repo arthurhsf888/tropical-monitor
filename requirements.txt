@@ -1,0 +1,11 @@
+pandas
+pyarrow
+geopandas
+shapely
+folium
+statsmodels
+evidently
+typer
+pydantic
+python-dotenv
+requests
