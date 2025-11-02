@@ -1,5 +1,4 @@
-import json
-import os
+import json, os
 from pathlib import Path
 import requests
 from dotenv import load_dotenv
@@ -11,15 +10,25 @@ def main():
     if not api_key:
         raise SystemExit("Falta DIFY_API_KEY no .env")
 
-    # 1) pega texto dos boletins baixados no fetch_mg()
+    # 1) texto dos boletins
     pdf_dir = Path("data/raw/mg")
     current_text, prev_text = get_current_and_previous_pdf_text(pdf_dir)
 
-    # 2) monta inputs exatamente como seu fluxo do Dify espera
+    # 2) carrega payload para satisfazer campos obrigatórios do Start
+    payload_path = Path("reports/weekly/payload.json")
+    payload = {}
+    if payload_path.exists():
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    kpis = json.dumps(payload.get("kpis", {}), ensure_ascii=False)
+    figures = json.dumps(payload.get("figures", {}), ensure_ascii=False)
+
+    # 3) monta inputs exatamente com os nomes do seu fluxo
     inputs = {
-        "current_pdf": [],           # não vamos enviar arquivo, só texto
-        "previous_pdf": [],          # idem
-        "current_text": current_text,
+        "kpis": kpis,                    # <-- agora enviado
+        "figures": figures,              # <-- agora enviado
+        "current_pdf": [],               # não usamos upload de arquivo
+        "previous_pdf": [],
+        "current_text": current_text,    # usados no LLM como contexto
         "previous_text": prev_text or "",
     }
 
@@ -30,31 +39,22 @@ def main():
     resp = requests.post(url, headers=headers, json=body)
     r = resp.json()
     print("[HTTP]", resp.status_code)
-
-    # salva resposta crua p/ debug
-    out_dir = Path("reports/weekly"); out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "response.json").write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
-
+    Path("reports/weekly/response.json").write_text(json.dumps(r, ensure_ascii=False, indent=2), encoding="utf-8")
     if resp.status_code != 200:
         raise SystemExit(json.dumps(r, ensure_ascii=False, indent=2))
 
-    # pega o markdown
     data = r.get("data", {}) or {}
     outputs = data.get("outputs") or {}
-    md = outputs.get("report_markdown") or ""
-    if not md:
-        # fallback genérico
-        md = next((v for v in outputs.values() if isinstance(v, str) and v.strip()), "")
-
+    md = outputs.get("report_markdown") or next((v for v in outputs.values() if isinstance(v, str) and v.strip()), "")
     if not md:
         raise SystemExit("Não achei report_markdown na resposta do Dify.")
 
-    # nomeia pelo dia do PDF atual (assumindo fetch_mg roda na semana)
-    week = (Path("data/processed/dengue_weekly.parquet").exists() and
-            __import__("pandas").read_parquet("data/processed/dengue_weekly.parquet")["week"].max())
-    week_str = str(getattr(week, "date", lambda: week)()) if week is not None else "latest"
+    # nome do arquivo da semana
+    import pandas as pd
+    week = pd.read_parquet("data/processed/dengue_weekly.parquet")["week"].max()
+    week_str = str(getattr(week, "date", lambda: week)())
 
-    out_md = out_dir / f"{week_str}.md"
+    out_md = Path("reports/weekly") / f"{week_str}.md"
     out_md.write_text(md, encoding="utf-8")
     print(f"[dify] boletim salvo -> {out_md.resolve()}")
 
