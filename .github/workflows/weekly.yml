@@ -36,7 +36,18 @@ jobs:
         run: |
           python -m src.cli visuals
 
-      - name: Call Dify to generate markdown
+      - name: Fetch MG Bulletin (SES-MG)
+        run: |
+          python -m src.cli fetch_mg
+
+      - name: Prepare weekly
+        run: |
+          python -m src.cli fetch
+          python -m src.cli prepare
+          python -m src.cli visuals
+          python -m src.cli report
+
+      - name: Call Dify (PDF text)
         env:
           DIFY_API_KEY: ${{ secrets.DIFY_API_KEY }}
         run: |
