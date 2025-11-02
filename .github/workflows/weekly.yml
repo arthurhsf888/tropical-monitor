@@ -37,13 +37,13 @@ jobs:
           ls -lah inputs/mg || true
           test -f inputs/mg/current.pdf || (echo "ERRO: inputs/mg/current.pdf não encontrado." && exit 1)
           python - << 'PY'
-from pathlib import Path
-import pdfplumber
-p = Path("inputs/mg/current.pdf")
-with pdfplumber.open(p) as pdf:
-    txt = (pdf.pages[0].extract_text() or "")[:500]
-print("OK: current.pdf aberto. Primeiros caracteres:\n", txt)
-PY
+          from pathlib import Path
+          import pdfplumber
+          p = Path("inputs/mg/current.pdf")
+          with pdfplumber.open(p) as pdf:
+              txt = (pdf.pages[0].extract_text() or "")[:500]
+          print("OK: current.pdf aberto. Primeiros caracteres:\n", txt)
+          PY
 
       # Gera série/figuras/payload locais (usado para 'kpis' e 'figures' do Start)
       - name: Generate weekly payload and figures
