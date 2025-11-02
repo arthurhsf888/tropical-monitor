@@ -10,26 +10,24 @@ def main():
     if not api_key:
         raise SystemExit("Falta DIFY_API_KEY no .env")
 
-    # 1) texto dos boletins
-    pdf_dir = Path("data/raw/mg")
-    current_text, prev_text = get_current_and_previous_pdf_text(pdf_dir)
+    # 1) Texto dos PDFs locais
+    current_text, prev_text = get_current_and_previous_pdf_text()
 
-    # 2) carrega payload para satisfazer campos obrigatórios do Start
+    # 2) KPIs/figures do payload (para satisfazer campos do Start)
     payload_path = Path("reports/weekly/payload.json")
-    payload = {}
-    if payload_path.exists():
-        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload = json.loads(payload_path.read_text(encoding="utf-8")) if payload_path.exists() else {}
     kpis = json.dumps(payload.get("kpis", {}), ensure_ascii=False)
     figures = json.dumps(payload.get("figures", {}), ensure_ascii=False)
 
-    # 3) monta inputs exatamente com os nomes do seu fluxo
+    # 3) Monta inputs iguais aos campos do Start no Dify
     inputs = {
-        "kpis": kpis,                    # <-- agora enviado
-        "figures": figures,              # <-- agora enviado
-        "current_pdf": [],               # não usamos upload de arquivo
-        "previous_pdf": [],
-        "current_text": current_text,    # usados no LLM como contexto
+        "kpis": kpis,
+        "figures": figures,
+        "current_text": current_text,
         "previous_text": prev_text or "",
+        # não usamos upload de arquivo:
+        "current_pdf": [],
+        "previous_pdf": [],
     }
 
     url = "https://api.dify.ai/v1/workflows/run"
@@ -49,12 +47,17 @@ def main():
     if not md:
         raise SystemExit("Não achei report_markdown na resposta do Dify.")
 
-    # nome do arquivo da semana
-    import pandas as pd
-    week = pd.read_parquet("data/processed/dengue_weekly.parquet")["week"].max()
-    week_str = str(getattr(week, "date", lambda: week)())
+    # nome do arquivo por semana (se existir parquet) senão 'latest'
+    week_str = "latest"
+    try:
+        import pandas as pd
+        week = pd.read_parquet("data/processed/dengue_weekly.parquet")["week"].max()
+        week_str = str(getattr(week, "date", lambda: week)())
+    except Exception:
+        pass
 
     out_md = Path("reports/weekly") / f"{week_str}.md"
+    out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text(md, encoding="utf-8")
     print(f"[dify] boletim salvo -> {out_md.resolve()}")
 
