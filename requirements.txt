@@ -9,3 +9,4 @@ typer
 pydantic
 python-dotenv
 requests
+pdfplumber
