@@ -14,7 +14,7 @@ def render_weekly():
     for col in ("cases", "deaths"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # pega a semana mais recente com pelo menos 1 caso/death ou simplesmente a última
+    # semana mais recente
     last_week = df["week"].max()
     ref = df[df["week"] == last_week].copy()
 
@@ -33,12 +33,17 @@ def render_weekly():
     )
 
     payload = {
-    "kpis": { ... },
-    "figures": {
-        "choropleth": "reports/figures/incidencia_semana.html",
-        "evidently": "reports/figures/evidently_weekly.html",
-        "serotype_map": "reports/figures/serotype_map.png",  # <--- NOVO
-    }
+        "kpis": {
+            "week": last_week.strftime("%Y-%m-%d"),
+            "cases_total": cases_total,
+            "deaths_total": deaths_total,
+            "uf_top_cases": uf_top,
+        },
+        "figures": {
+            "choropleth": "reports/figures/incidencia_semana.html",
+            "evidently": "reports/figures/evidently_weekly.html",
+            "serotype_map": "reports/figures/serotype_map.png",
+        }
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

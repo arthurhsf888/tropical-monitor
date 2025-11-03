@@ -8,10 +8,10 @@ import requests
 from dotenv import load_dotenv
 
 
-def _load_payload() -> tuple[str, str]:
+def _load_payload() -> tuple[str, str, str]:
     """
-    Lê reports/weekly/payload.json (se existir) e devolve (kpis_json, figures_json)
-    como strings JSON. Isso satisfaz os campos do nó Iniciar no Dify.
+    Lê reports/weekly/payload.json (se existir) e devolve (kpis_json, figures_json, map_path)
+    como strings JSON + caminho da imagem do mapa (se houver).
     """
     payload_path = Path("reports/weekly/payload.json")
     if payload_path.exists():
@@ -21,7 +21,12 @@ def _load_payload() -> tuple[str, str]:
 
     kpis = json.dumps(payload.get("kpis", {}), ensure_ascii=False)
     figures = json.dumps(payload.get("figures", {}), ensure_ascii=False)
-    return kpis, figures
+
+    # extrai o caminho do mapa (se existir nas figures)
+    figures_dict = payload.get("figures", {}) if isinstance(payload.get("figures", {}), dict) else {}
+    map_path = figures_dict.get("serotype_map", "")
+
+    return kpis, figures, map_path
 
 
 def _read_week_label() -> str:
@@ -30,12 +35,11 @@ def _read_week_label() -> str:
     usa a data de hoje como rótulo.
     """
     try:
-        import pandas as pd  # import local para evitar custo se não usado
+        import pandas as pd  # import local
         parquet = Path("data/processed/dengue_weekly.parquet")
         if parquet.exists():
             df = pd.read_parquet(parquet)
             wk = df["week"].max()
-            # Se 'week' já for date/datetime:
             try:
                 return str(wk.date())
             except Exception:
@@ -54,25 +58,31 @@ def main() -> None:
     if not api_key:
         raise SystemExit("Falta DIFY_API_KEY no .env ou no ambiente.")
 
-    # Lê texto dos PDFs locais
+    # Texto dos PDFs locais
     from src.report.extract_pdf_text import get_current_and_previous_pdf_text
-
     current_text, prev_text = get_current_and_previous_pdf_text()
 
-    # Lê kpis/figures do payload (ou envia {} se não existir)
-    kpis_json_str, figures_json_str = _load_payload()
+    # DEBUG: verifique se veio texto
+    print(f"[debug] current_text chars: {len(current_text)}")
+    print("[debug] current_text sample:", current_text[:400].replace("\n", " "))
+    if prev_text:
+        print(f"[debug] previous_text chars: {len(prev_text)}")
 
-    # Monta os inputs com os MESMOS nomes dos campos do nó Iniciar no Dify
+    # Carrega figures e caminho do mapa (kpis não será usado no LLM)
+    kpis_json_str, figures_json_str, map_path = _load_payload()
+
+    # Monta os inputs usados no Start do Dify
     inputs = {
-        # remova kpis:
+        # NÃO enviar 'kpis' para não poluir o LLM com zeros
         # "kpis": kpis_json_str,
 
-        "figures": figures_json_str,    # ok manter (se usar imagem no MD)
-        "map_path": map_path,           # se estiver usando a imagem
+        "figures": figures_json_str,    # ok manter (se usa a seção de figuras)
+        "map_path": map_path,           # para embutir a imagem no markdown
 
         "current_text": current_text,   # texto do PDF
         "previous_text": prev_text or "",
 
+        # campos de arquivo não usados
         "current_pdf": [],
         "previous_pdf": [],
     }
@@ -88,11 +98,13 @@ def main() -> None:
     resp = requests.post(url, headers=headers, json=body, timeout=90)
     print("[HTTP]", resp.status_code)
 
-    # Sempre salva a resposta crua para depuração
     out_dir = Path("reports/weekly")
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = out_dir / "response.json"
-    raw_path.write_text(json.dumps(resp.json(), ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        raw_path.write_text(json.dumps(resp.json(), ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        raw_path.write_text(str(resp.text), encoding="utf-8")
 
     if resp.status_code != 200:
         raise SystemExit(raw_path.read_text(encoding="utf-8"))
@@ -100,10 +112,8 @@ def main() -> None:
     data = resp.json().get("data", {}) or {}
     outputs = data.get("outputs") or {}
 
-    # Esperamos 'report_markdown' no nó FIM
     md = outputs.get("report_markdown")
     if not isinstance(md, str) or not md.strip():
-        # Fallback: tenta pegar qualquer string não vazia das saídas
         md = next((v for v in outputs.values() if isinstance(v, str) and v.strip()), "")
 
     if not md:
