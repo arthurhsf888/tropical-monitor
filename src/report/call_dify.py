@@ -64,16 +64,15 @@ def main() -> None:
 
     # Monta os inputs com os MESMOS nomes dos campos do nó Iniciar no Dify
     inputs = {
-        # Campos do seu Start (mantidos para compatibilidade)
-        "kpis": kpis_json_str,
-        "figures": figures_json_str,
+        # remova kpis:
+        # "kpis": kpis_json_str,
 
-        # Texto dos PDFs (o LLM deve ter essas variáveis no Contexto)
-        "current_text": current_text,
+        "figures": figures_json_str,    # ok manter (se usar imagem no MD)
+        "map_path": map_path,           # se estiver usando a imagem
+
+        "current_text": current_text,   # texto do PDF
         "previous_text": prev_text or "",
 
-        # Se o seu fluxo ainda tiver esses campos como não obrigatórios,
-        # mandamos lista vazia para evitar erro de tipagem.
         "current_pdf": [],
         "previous_pdf": [],
     }

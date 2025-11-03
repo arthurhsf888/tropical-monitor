@@ -33,16 +33,12 @@ def render_weekly():
     )
 
     payload = {
-        "kpis": {
-            "week": last_week.date().isoformat(),
-            "cases_total": cases_total,
-            "deaths_total": deaths_total,
-            "uf_top_cases": uf_top,
-        },
-        "figures": {
-            "choropleth": "reports/figures/incidencia_semana.html",
-            "evidently": "reports/figures/evidently_weekly.html"
-        }
+    "kpis": { ... },
+    "figures": {
+        "choropleth": "reports/figures/incidencia_semana.html",
+        "evidently": "reports/figures/evidently_weekly.html",
+        "serotype_map": "reports/figures/serotype_map.png",  # <--- NOVO
+    }
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
